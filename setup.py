@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from setuptools import setup
 
 setup(
@@ -7,6 +9,6 @@ setup(
     author='Spencer Russell',
     author_email='sfr@mit.edu',
     url='http://github.com/ssfrr/chainclient.py',
-    licence='MIT',
+    license='MIT',
     install_requires=['requests'],
 )
