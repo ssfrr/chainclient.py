@@ -11,15 +11,24 @@ class ConnectionError(Exception):
     pass
 
 
+class ChainException(Exception):
+    pass
+
+
 def get(href):
     '''Performs an HTTP GET request at the given href (url) and creates
     a HALDoc from the response. The response is assumed to come back in
     hal+json format'''
     logger.debug('HTTP GET %s' % href)
     try:
-        response = requests.get(href).json()
+        response = requests.get(href)
     except requests.exceptions.ConnectionError as e:
         raise ConnectionError(e)
+
+    if response.status_code >= 400:
+        raise ChainException(response.content)
+
+    response = response.json()
 
     logger.debug('Received %s' % response)
     return HALDoc(response)
@@ -161,6 +170,9 @@ class HALDoc(AttrDict):
             response = requests.post(create_url, data=json.dumps(resource))
         except requests.exceptions.ConnectionError as e:
             raise ConnectionError(e)
+        if response.status_code >= 400:
+            raise ChainException(response.content)
+
         resource = HALDoc(response.json())
         if 'items' in self.rels:
             # if this is a collection with an items rel then we can add the new
