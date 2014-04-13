@@ -15,10 +15,7 @@ class ChainException(Exception):
     pass
 
 
-def get(href):
-    '''Performs an HTTP GET request at the given href (url) and creates
-    a HALDoc from the response. The response is assumed to come back in
-    hal+json format'''
+def _get_with_error(href):
     logger.debug('HTTP GET %s' % href)
     try:
         response = requests.get(href)
@@ -27,9 +24,14 @@ def get(href):
 
     if response.status_code >= 400:
         raise ChainException(response.content)
+    return response
 
-    response = response.json()
 
+def get(href):
+    '''Performs an HTTP GET request at the given href (url) and creates
+    a HALDoc from the response. The response is assumed to come back in
+    hal+json format'''
+    response = _get_with_error(href).json()
     logger.debug('Received %s' % response)
     return HALDoc(response)
 
@@ -63,10 +65,15 @@ class RelList(object):
     '''A RelList represents a list of rels that will auto-retreive the data on
     demand. Typically it's initialized with a list of links that are resolved
     as needed. It may also contain full resources, in which case they are just
-    returned. Note that it's not currently handling pagination'''
+    returned. If the list is paginated, the user should provide the link href,
+    and the RelList will take care of requesting the next page as needed.
 
-    def __init__(self, rels):
+    Note that random access with obj[i] only works for items we've already
+    requested. To take advantage of the pagination handling use iteration'''
+
+    def __init__(self, rels, next_link_href=None):
         self._rels = rels
+        self._next_link = next_link_href
 
     def __len__(self):
         return len(self._rels)
@@ -86,6 +93,18 @@ class RelList(object):
     def __iter__(self):
         return RelListIter(self)
 
+    def get_next_page(self):
+        '''Goes and gets the next page of results and appends it to the list'''
+        next_page = get(self._next_link)
+        if 'next' in next_page.links:
+            self._next_link = next_page.links['next'].href
+        else:
+            self._next_link = None
+        self._rels.extend(next_page.links['items'])
+
+    def has_next_page(self):
+        return self._next_link is not None
+
 
 class RelListIter(object):
     '''Used to iterate through a RelList'''
@@ -96,7 +115,11 @@ class RelListIter(object):
 
     def next(self):
         if self._idx == len(self._link_list):
-            raise StopIteration()
+            if self._link_list.has_next_page():
+                logger.debug('End of page reached, requesting next page')
+                self._link_list.get_next_page()
+            else:
+                raise StopIteration()
         item = self._link_list[self._idx]
         self._idx += 1
         return item
@@ -123,7 +146,12 @@ class RelResolver(object):
             if isinstance(rel, list):
                 # this is a list of related resources, so we defer to RelList
                 # to handle fetching them on demand
-                links = RelList(self._resource.links[key])
+                if key == 'items' and 'next' in self._resource.links:
+                    # this rel is a paginated list
+                    next_link = self._resource.links['next'].href
+                else:
+                    next_link = None
+                links = RelList(self._resource.links[key], next_link)
                 self._resource.embed_resource(key, links)
                 return links
             # it's just one resource, so we can fetch it right here and return
