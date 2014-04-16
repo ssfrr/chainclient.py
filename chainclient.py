@@ -43,11 +43,21 @@ class AttrDict(dict):
     def __init__(self, *args):
         dict.__init__(self, *args)
         for k, v in self.iteritems():
-            setattr(self, k, v)
+            setattr(self, k, self._convert(v))
 
     def __setitem__(self, k, v):
+        v = self._convert(v)
         dict.__setitem__(self, k, v)
         setattr(self, k, v)
+
+    @classmethod
+    def _convert(cls, v):
+        if isinstance(v, dict):
+            return AttrDict(v)
+        elif isinstance(v, list):
+            return [cls._convert(item) for item in v]
+        else:
+            return v
 
 
 class HALLink(AttrDict):
