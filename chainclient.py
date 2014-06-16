@@ -52,6 +52,8 @@ class AttrDict(dict):
 
     @classmethod
     def _convert(cls, v):
+        if isinstance(v, AttrDict):
+            return v
         if isinstance(v, dict):
             return AttrDict(v)
         elif isinstance(v, list):
