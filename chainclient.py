@@ -27,13 +27,13 @@ def _get_with_error(href):
     return response
 
 
-def get(href):
+def get(href, cache=True):
     '''Performs an HTTP GET request at the given href (url) and creates
     a HALDoc from the response. The response is assumed to come back in
     hal+json format'''
     response = _get_with_error(href).json()
     logger.debug('Received %s' % response)
-    return HALDoc(response)
+    return HALDoc(response, cache=cache)
 
 
 class AttrDict(dict):
@@ -83,9 +83,10 @@ class RelList(object):
     Note that random access with obj[i] only works for items we've already
     requested. To take advantage of the pagination handling use iteration'''
 
-    def __init__(self, rels, next_link_href=None):
+    def __init__(self, rels, next_link_href=None, cache=True):
         self._rels = rels
         self._next_link = next_link_href
+        self._should_cache = cache
 
     def __len__(self):
         return len(self._rels)
@@ -95,8 +96,10 @@ class RelList(object):
         if isinstance(item, HALDoc):
             return item
         # it's not a full item, assume it's a link and fetch it
-        resource = get(item.href)
-        self._rels[idx] = resource
+        resource = get(item.href, cache=self._should_cache)
+        if self._should_cache:
+            # cache the full resource in place of the link
+            self._rels[idx] = resource
         return resource
 
     def append(self, item):
@@ -107,7 +110,7 @@ class RelList(object):
 
     def get_next_page(self):
         '''Goes and gets the next page of results and appends it to the list'''
-        next_page = get(self._next_link)
+        next_page = get(self._next_link, cache=self._should_cache)
         if 'next' in next_page.links:
             self._next_link = next_page.links['next'].href
         else:
@@ -141,8 +144,9 @@ class RelResolver(object):
     '''A RelResolver is attached to a resource and handles retreiving related
     resources when necessary, and caching them as embedded resources'''
 
-    def __init__(self, resource):
+    def __init__(self, resource, cache=True):
         self._resource = resource
+        self._should_cache = cache
 
     def __contains__(self, key):
         return key in self._resource.embedded or key in self._resource.links
@@ -163,14 +167,17 @@ class RelResolver(object):
                     next_link = self._resource.links['next'].href
                 else:
                     next_link = None
-                links = RelList(self._resource.links[key], next_link)
-                self._resource.embed_resource(key, links)
+                links = RelList(self._resource.links[key], next_link,
+                                cache=self._should_cache)
+                if self._should_cache:
+                    self._resource.embed_resource(key, links)
                 return links
             # it's just one resource, so we can fetch it right here and return
             # the actual resource. We also cache it as an embedded resource so
             # next time we don't need to re-fetch it
-            resource = get(rel.href)
-            self._resource.embed_resource(key, resource)
+            resource = get(rel.href, cache=self._should_cache)
+            if self._should_cache:
+                self._resource.embed_resource(key, resource)
             return resource
 
 
@@ -183,13 +190,14 @@ class HALDoc(AttrDict):
     GET. Most of the time HALDocs aren't created directly, but with the 'get'
     function defined in this module'''
 
-    def __init__(self, *args):
+    def __init__(self, response, cache=True, *args, **kwargs):
         '''builds a HALDoc from a python dictionary. A HALDoc can also be
         treated as a standard dict to access the raw data'''
-        AttrDict.__init__(self, *args)
+        AttrDict.__init__(self, response, *args, **kwargs)
         self.links = AttrDict()
         self.embedded = AttrDict()
-        self.rels = RelResolver(self)
+        self.rels = RelResolver(self, cache=cache)
+        self._should_cache = cache
 
         if '_links' in self:
             for rel, link in self['_links'].iteritems():
@@ -200,7 +208,7 @@ class HALDoc(AttrDict):
                 else:
                     self.links[rel] = HALLink(link)
 
-    def create(self, resource):
+    def create(self, resource, cache=True):
         '''Assumes this resource is some kind of collection that can have new
         resources added to it. Attempts to post the given resource to this
         resource's 'createForm' link'''
@@ -214,7 +222,7 @@ class HALDoc(AttrDict):
             raise ChainException(response.content)
 
         resource = HALDoc(response.json())
-        if 'items' in self.rels:
+        if self._should_cache and cache and 'items' in self.rels:
             # if this is a collection with an items rel then we can add the new
             # item to it
             self.rels['items'].append(resource)
