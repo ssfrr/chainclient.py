@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name='chainclient',
-    version='0.2.0',
+    version='0.3.0',
     description='A Python client for the Chain API',
     py_modules=['chainclient'],
     author='Spencer Russell',
