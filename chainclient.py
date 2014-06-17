@@ -15,10 +15,13 @@ class ChainException(Exception):
     pass
 
 
-def _get_with_error(href):
+def _get_with_error(href, auth=None):
+    '''perform an HTTP GET and handle possible error codes. auth should be a
+    tuple e.g. ('username', 'password'). It could also be any other Auth object
+    that the requests library understands'''
     logger.debug('HTTP GET %s' % href)
     try:
-        response = requests.get(href)
+        response = requests.get(href, auth=auth)
     except requests.exceptions.ConnectionError as e:
         raise ConnectionError(e)
 
@@ -27,13 +30,13 @@ def _get_with_error(href):
     return response
 
 
-def get(href, cache=True):
+def get(href, cache=True, auth=None):
     '''Performs an HTTP GET request at the given href (url) and creates
     a HALDoc from the response. The response is assumed to come back in
     hal+json format'''
-    response = _get_with_error(href).json()
+    response = _get_with_error(href, auth=auth).json()
     logger.debug('Received %s' % response)
-    return HALDoc(response, cache=cache)
+    return HALDoc(response, cache=cache, auth=auth)
 
 
 class AttrDict(dict):
@@ -83,10 +86,11 @@ class RelList(object):
     Note that random access with obj[i] only works for items we've already
     requested. To take advantage of the pagination handling use iteration'''
 
-    def __init__(self, rels, next_link_href=None, cache=True):
+    def __init__(self, rels, next_link_href=None, cache=True, auth=None):
         self._rels = rels
         self._next_link = next_link_href
         self._should_cache = cache
+        self._auth = auth
 
     def __len__(self):
         return len(self._rels)
@@ -96,7 +100,7 @@ class RelList(object):
         if isinstance(item, HALDoc):
             return item
         # it's not a full item, assume it's a link and fetch it
-        resource = get(item.href, cache=self._should_cache)
+        resource = get(item.href, cache=self._should_cache, auth=self._auth)
         if self._should_cache:
             # cache the full resource in place of the link
             self._rels[idx] = resource
@@ -110,7 +114,8 @@ class RelList(object):
 
     def get_next_page(self):
         '''Goes and gets the next page of results and appends it to the list'''
-        next_page = get(self._next_link, cache=self._should_cache)
+        next_page = get(self._next_link, cache=self._should_cache,
+                        auth=self._auth)
         if 'next' in next_page.links:
             self._next_link = next_page.links['next'].href
         else:
@@ -144,9 +149,10 @@ class RelResolver(object):
     '''A RelResolver is attached to a resource and handles retreiving related
     resources when necessary, and caching them as embedded resources'''
 
-    def __init__(self, resource, cache=True):
+    def __init__(self, resource, cache=True, auth=None):
         self._resource = resource
         self._should_cache = cache
+        self._auth = auth
 
     def __contains__(self, key):
         return key in self._resource.embedded or key in self._resource.links
@@ -168,14 +174,14 @@ class RelResolver(object):
                 else:
                     next_link = None
                 links = RelList(self._resource.links[key], next_link,
-                                cache=self._should_cache)
+                                cache=self._should_cache, auth=self._auth)
                 if self._should_cache:
                     self._resource.embed_resource(key, links)
                 return links
             # it's just one resource, so we can fetch it right here and return
             # the actual resource. We also cache it as an embedded resource so
             # next time we don't need to re-fetch it
-            resource = get(rel.href, cache=self._should_cache)
+            resource = get(rel.href, cache=self._should_cache, auth=self._auth)
             if self._should_cache:
                 self._resource.embed_resource(key, resource)
             return resource
@@ -190,14 +196,15 @@ class HALDoc(AttrDict):
     GET. Most of the time HALDocs aren't created directly, but with the 'get'
     function defined in this module'''
 
-    def __init__(self, response, cache=True, *args, **kwargs):
+    def __init__(self, response, cache=True, auth=None, *args, **kwargs):
         '''builds a HALDoc from a python dictionary. A HALDoc can also be
         treated as a standard dict to access the raw data'''
         AttrDict.__init__(self, response, *args, **kwargs)
         self.links = AttrDict()
         self.embedded = AttrDict()
-        self.rels = RelResolver(self, cache=cache)
+        self.rels = RelResolver(self, cache=cache, auth=auth)
         self._should_cache = cache
+        self._auth = auth
 
         if '_links' in self:
             for rel, link in self['_links'].iteritems():
@@ -211,11 +218,13 @@ class HALDoc(AttrDict):
     def create(self, resource, cache=True):
         '''Assumes this resource is some kind of collection that can have new
         resources added to it. Attempts to post the given resource to this
-        resource's 'createForm' link'''
+        resource's 'createForm' link. You can override the HALDoc's cache
+        setting when creating resources, such as in a data posting script'''
         create_url = self.links.createForm.href
         logger.debug("posting %s to %s" % (resource, create_url))
         try:
-            response = requests.post(create_url, data=json.dumps(resource))
+            response = requests.post(create_url, data=json.dumps(resource),
+                                     auth=self._auth)
         except requests.exceptions.ConnectionError as e:
             raise ConnectionError(e)
         if response.status_code >= 400:
