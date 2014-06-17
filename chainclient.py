@@ -15,17 +15,27 @@ class ChainException(Exception):
     pass
 
 
-def _get_with_error(href, auth=None):
+def _request_with_error(req_type, href, data=None, auth=None):
     '''perform an HTTP GET and handle possible error codes. auth should be a
     tuple e.g. ('username', 'password'). It could also be any other Auth object
     that the requests library understands'''
-    logger.debug('HTTP GET %s' % href)
+    logger.debug('HTTP %s %s' % (req_type, href))
     try:
-        response = requests.get(href, auth=auth)
+        if req_type == 'GET':
+            response = requests.get(href, auth=auth)
+        elif req_type == 'POST':
+            response = requests.post(href, data=data, auth=auth)
+        else:
+            raise ChainException(
+                'Unrecognized request type, use "GET" or "POST"')
     except requests.exceptions.ConnectionError as e:
         raise ConnectionError(e)
 
-    if response.status_code >= 400:
+    if response.status_code == 401:
+        raise ChainException(
+            'Unauthorized, please authenticate the request with ' +
+            'auth=("user", "pass")')
+    elif response.status_code >= 400:
         raise ChainException(response.content)
     return response
 
@@ -34,7 +44,7 @@ def get(href, cache=True, auth=None):
     '''Performs an HTTP GET request at the given href (url) and creates
     a HALDoc from the response. The response is assumed to come back in
     hal+json format'''
-    response = _get_with_error(href, auth=auth).json()
+    response = _request_with_error('GET', href, auth=auth).json()
     logger.debug('Received %s' % response)
     return HALDoc(response, cache=cache, auth=auth)
 
@@ -222,13 +232,9 @@ class HALDoc(AttrDict):
         setting when creating resources, such as in a data posting script'''
         create_url = self.links.createForm.href
         logger.debug("posting %s to %s" % (resource, create_url))
-        try:
-            response = requests.post(create_url, data=json.dumps(resource),
-                                     auth=self._auth)
-        except requests.exceptions.ConnectionError as e:
-            raise ConnectionError(e)
-        if response.status_code >= 400:
-            raise ChainException(response.content)
+        response = _request_with_error('POST', create_url,
+                                       data=json.dumps(resource),
+                                       auth=self._auth)
 
         resource = HALDoc(response.json())
         if self._should_cache and cache and 'items' in self.rels:
