@@ -119,6 +119,9 @@ class RelList(object):
     def append(self, item):
         self._rels.append(item)
 
+    def extend(self, items):
+        self._rels.extend(items)
+
     def __iter__(self):
         return RelListIter(self)
 
@@ -236,14 +239,22 @@ class HALDoc(AttrDict):
         logger.debug("posting %s to %s" % (resource, create_url))
         response = _request_with_error('POST', create_url,
                                        data=json.dumps(resource),
-                                       auth=auth)
+                                       auth=auth).json()
 
-        resource = HALDoc(response.json())
-        if self._should_cache and cache and 'items' in self.rels:
-            # if this is a collection with an items rel then we can add the new
-            # item to it
-            self.rels['items'].append(resource)
-        return resource
+        if isinstance(response, list):
+            resources = [HALDoc(item) for item in response]
+            if self._should_cache and cache and 'items' in self.rels:
+                # if this is a collection with an items rel then we can add the
+                # new items to it
+                self.rels['items'].extend(resources)
+            return resources
+        else:
+            resource = HALDoc(response)
+            if self._should_cache and cache and 'items' in self.rels:
+                # if this is a collection with an items rel then we can add the
+                # new item to it
+                self.rels['items'].append(resource)
+            return resource
 
     def embed_resource(self, rel, resource):
         self.embedded[rel] = resource
