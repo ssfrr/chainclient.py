@@ -225,16 +225,18 @@ class HALDoc(AttrDict):
                 else:
                     self.links[rel] = HALLink(link)
 
-    def create(self, resource, cache=True):
+    def create(self, resource, cache=True, auth=None):
         '''Assumes this resource is some kind of collection that can have new
         resources added to it. Attempts to post the given resource to this
         resource's 'createForm' link. You can override the HALDoc's cache
         setting when creating resources, such as in a data posting script'''
         create_url = self.links.createForm.href
+        # if auth info is given here, override self._auth
+        auth = auth or self._auth
         logger.debug("posting %s to %s" % (resource, create_url))
         response = _request_with_error('POST', create_url,
                                        data=json.dumps(resource),
-                                       auth=self._auth)
+                                       auth=auth)
 
         resource = HALDoc(response.json())
         if self._should_cache and cache and 'items' in self.rels:
