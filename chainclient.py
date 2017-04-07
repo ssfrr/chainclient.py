@@ -228,11 +228,9 @@ class HALDoc(AttrDict):
         self._auth = auth
 
         if '_links' in self:
-            try:
-                # Python 2
+            try: # Python 2
                 lst = self['_links'].iteritems()
-            except:
-                # Python 3
+            except: # Python 3
                 lst = self['_links'].items()
 
             for rel, link in lst:
