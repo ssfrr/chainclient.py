@@ -55,7 +55,12 @@ class AttrDict(dict):
 
     def __init__(self, *args):
         dict.__init__(self, *args)
-        for k, v in self.iteritems():
+        try: # Python 2
+            lst = self.iteritems()
+        except:  # Python 3
+            lst = self.items()
+
+        for k, v in lst:
             setattr(self, k, self._convert(v))
 
     def __setitem__(self, k, v):
@@ -157,6 +162,9 @@ class RelListIter(object):
         self._idx += 1
         return item
 
+    # For Python3 Iterator
+    def __next__(self):
+        return self.next()
 
 class RelResolver(object):
     '''A RelResolver is attached to a resource and handles retreiving related
@@ -220,7 +228,12 @@ class HALDoc(AttrDict):
         self._auth = auth
 
         if '_links' in self:
-            for rel, link in self['_links'].iteritems():
+            try: # Python 2
+                lst = self['_links'].iteritems()
+            except: # Python 3
+                lst = self['_links'].items()
+
+            for rel, link in lst:
                 if isinstance(link, list):
                     self.links[rel] = []
                     for link_item in link:
